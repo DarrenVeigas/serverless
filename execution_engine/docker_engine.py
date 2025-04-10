@@ -175,7 +175,7 @@ class DockerExecutionEngine:
             detach=True,
             remove=False  # We'll remove it manually after execution
         )
-    
+        
     def execute_function(self, function, event_data, timeout=30):
         """
         Execute a function with the given event data
@@ -189,30 +189,54 @@ class DockerExecutionEngine:
         
         # Run the container
         try:
-            # Run a new container
-            result = self.client.containers.run(
+            # Create a new container without starting it
+            container = self.client.containers.create(
                 image=function.container_image,
-                remove=True,  # Remove container after execution
                 stdin_open=True,
                 tty=False,
                 command=None,  # Use the default command from the image
-                input=event_json.encode('utf-8'),
-                stdout=True,
-                stderr=True,
-                timeout=timeout  # Set timeout
             )
             
-            # Try to parse the result as JSON
             try:
-                return json.loads(result.decode('utf-8'))
-            except json.JSONDecodeError:
-                return {"output": result.decode('utf-8')}
-        
-        except docker.errors.ContainerError as e:
-            # Handle container execution error
-            error_message = f"Function execution failed: {str(e)}"
-            print(error_message)
-            raise RuntimeError(error_message)
+                # Start the container
+                container.start()
+                
+                # Attach to the container to get logs
+                output = container.attach(stdout=True, stderr=True, stream=False)
+                
+                # Use low-level API to send input to the container
+                socket = self.client.api.attach_socket(
+                    container=container.id, 
+                    params={'stdin': 1, 'stream': 1}
+                )
+                
+                # Send the input data
+                os.write(socket.fileno(), event_json.encode('utf-8'))
+                os.close(socket.fileno())
+                
+                # Wait for container to finish with timeout
+                start_time = time.time()
+                status = container.wait(timeout=timeout)
+                
+                # Get container output
+                logs = container.logs(stdout=True, stderr=True).decode('utf-8')
+                
+                # Check container exit code
+                if status['StatusCode'] != 0:
+                    raise RuntimeError(f"Function execution failed with exit code {status['StatusCode']}: {logs}")
+                
+                # Try to parse the result as JSON
+                try:
+                    return json.loads(logs)
+                except json.JSONDecodeError:
+                    return {"output": logs}
+                    
+            finally:
+                # Always clean up the container
+                try:
+                    container.remove(force=True)
+                except Exception as e:
+                    print(f"Error removing container {container.id}: {e}")
         
         except docker.errors.ImageNotFound:
             # Handle missing image

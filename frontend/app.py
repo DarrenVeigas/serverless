@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import json
 import time
-
+import os
 # Set page config
 st.set_page_config(
     page_title="Serverless Function Platform",
@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # API URL - update this to match your backend URL
-API_URL = "http://localhost:8000"
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 # Page title
 st.title("Serverless Function Platform")

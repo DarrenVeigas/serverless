@@ -4,8 +4,8 @@ services:
   # Backend API service
   backend:
     build:
-      context: ../backend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: backend/Dockerfile
     container_name: serverless-backend
     volumes:
       - ../backend:/app/backend
@@ -26,8 +26,8 @@ services:
   # Frontend service
   frontend:
     build:
-      context: ../frontend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: frontend/Dockerfile
     container_name: serverless-frontend
     volumes:
       - ../frontend:/app/frontend

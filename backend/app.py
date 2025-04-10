@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from backend.db.database import engine, get_db
 from backend.models.function import Base, Function
 from backend.routers import functions, metrics
+from fastapi import Depends
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -41,7 +42,11 @@ async def add_process_time_header(request: Request, call_next):
 
 # Route functions to their endpoints
 @app.api_route("/invoke/{function_route}", methods=["GET", "POST", "PUT", "DELETE"])
-async def route_function(function_route: str, request: Request, db: Session = next(get_db())):
+async def route_function(
+    function_route: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
     """
     Route requests to the appropriate function based on the route
     """
@@ -57,13 +62,23 @@ async def route_function(function_route: str, request: Request, db: Session = ne
     # Get request data
     request_data = {}
     if request.method in ["POST", "PUT"]:
-        request_data = await request.json()
+        try:
+            request_data = await request.json()
+        except:
+            # Handle case where no JSON body is provided
+            request_data = {}
     
     # Import the function execution router
     from backend.routers.functions import execute_function
     
     # Execute the function and return the result
-    return execute_function(function.id, request_data, db)
+    try:
+        # Call the execute_function directly with the correct arguments
+        return execute_function(function_id=function.id, request_data=request_data, db=db)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Error executing function: {str(e)}"}
 
 @app.get("/")
 def read_root():

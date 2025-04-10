@@ -11,7 +11,6 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI
-RUN curl -fsSL https://get.docker.com | sh
 
 # Copy requirements
 COPY ../requirements.txt .
