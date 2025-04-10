@@ -1,0 +1,12 @@
+FROM node:18-slim
+
+WORKDIR /app
+
+# Copy function code
+COPY function.js /app/
+
+# Set environment variables
+ENV NODE_ENV=production
+
+# Run function with timeout
+CMD ["node", "function.js"]

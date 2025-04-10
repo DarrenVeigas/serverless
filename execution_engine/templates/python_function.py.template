@@ -1,0 +1,21 @@
+import json
+import sys
+
+# Function code
+{{FUNCTION_CODE}}
+
+def handler(event):
+    """
+    Function handler that will be called by the execution engine
+    """
+    return main(event)
+
+if __name__ == "__main__":
+    # Read event data from stdin
+    event_data = json.loads(sys.stdin.read())
+    
+    # Call the handler and get the result
+    result = handler(event_data)
+    
+    # Output the result as JSON
+    print(json.dumps(result))

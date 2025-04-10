@@ -1,0 +1,183 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+import os
+import time
+
+from backend.db.database import get_db
+from backend.models.function import Function, Execution
+from backend.models.schemas import FunctionCreate, Function as FunctionSchema, FunctionWithExecutions
+
+# Import execution engine
+from execution_engine.docker_engine import DockerExecutionEngine
+
+router = APIRouter(
+    prefix="/functions",
+    tags=["functions"],
+    responses={404: {"description": "Not found"}},
+)
+
+# Initialize execution engine
+docker_engine = DockerExecutionEngine()
+
+@router.post("/", response_model=FunctionSchema, status_code=status.HTTP_201_CREATED)
+def create_function(function: FunctionCreate, db: Session = Depends(get_db)):
+    """
+    Create a new function
+    """
+    db_function = Function(
+        name=function.name,
+        route=function.route,
+        language=function.language,
+        code=function.code,
+        timeout=function.timeout
+    )
+    
+    db.add(db_function)
+    db.commit()
+    db.refresh(db_function)
+    
+    # Build container image for this function
+    try:
+        container_image = docker_engine.build_function_image(db_function)
+        db_function.container_image = container_image
+        db.commit()
+    except Exception as e:
+        # If container build fails, we'll still save the function but mark it as inactive
+        db_function.is_active = False
+        db.commit()
+        print(f"Error building container image: {e}")
+    
+    return db_function
+
+@router.get("/", response_model=List[FunctionSchema])
+def get_functions(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """
+    Get all functions
+    """
+    functions = db.query(Function).offset(skip).limit(limit).all()
+    return functions
+
+@router.get("/{function_id}", response_model=FunctionWithExecutions)
+def get_function(function_id: int, db: Session = Depends(get_db)):
+    """
+    Get a specific function by ID
+    """
+    function = db.query(Function).filter(Function.id == function_id).first()
+    if function is None:
+        raise HTTPException(status_code=404, detail="Function not found")
+    return function
+
+@router.put("/{function_id}", response_model=FunctionSchema)
+def update_function(function_id: int, function: FunctionCreate, db: Session = Depends(get_db)):
+    """
+    Update a function
+    """
+    db_function = db.query(Function).filter(Function.id == function_id).first()
+    if db_function is None:
+        raise HTTPException(status_code=404, detail="Function not found")
+    
+    # Update function attributes
+    db_function.name = function.name
+    db_function.route = function.route
+    db_function.language = function.language
+    db_function.code = function.code
+    db_function.timeout = function.timeout
+    
+    # Rebuild container image
+    try:
+        container_image = docker_engine.build_function_image(db_function)
+        db_function.container_image = container_image
+        db_function.is_active = True
+    except Exception as e:
+        # If container build fails, mark function as inactive
+        db_function.is_active = False
+        print(f"Error rebuilding container image: {e}")
+    
+    db.commit()
+    db.refresh(db_function)
+    return db_function
+
+@router.delete("/{function_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_function(function_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a function
+    """
+    db_function = db.query(Function).filter(Function.id == function_id).first()
+    if db_function is None:
+        raise HTTPException(status_code=404, detail="Function not found")
+    
+    # Remove container image if it exists
+    if db_function.container_image:
+        try:
+            docker_engine.remove_function_image(db_function.container_image)
+        except Exception as e:
+            print(f"Error removing container image: {e}")
+    
+    # Delete function from database
+    db.delete(db_function)
+    db.commit()
+    return {"detail": "Function deleted"}
+
+@router.post("/{function_id}/execute", status_code=status.HTTP_200_OK)
+def execute_function(function_id: int, request_data: dict = None, db: Session = Depends(get_db)):
+    """
+    Execute a function and return its result
+    """
+    if request_data is None:
+        request_data = {}
+    
+    db_function = db.query(Function).filter(Function.id == function_id).first()
+    if db_function is None:
+        raise HTTPException(status_code=404, detail="Function not found")
+    
+    if not db_function.is_active:
+        raise HTTPException(status_code=400, detail="Function is not active")
+    
+    # Record execution start time
+    start_time = time.time()
+    
+    try:
+        # Execute function using Docker engine
+        result = docker_engine.execute_function(
+            db_function,
+            request_data,
+            timeout=db_function.timeout
+        )
+        
+        # Record execution end time
+        end_time = time.time()
+        execution_time = (end_time - start_time) * 1000  # Convert to milliseconds
+        
+        # Store execution data
+        execution = Execution(
+            function_id=function_id,
+            start_time=start_time,
+            end_time=end_time,
+            execution_time=execution_time,
+            status="success",
+            virtualization="docker"
+        )
+        db.add(execution)
+        db.commit()
+        
+        return result
+    except Exception as e:
+        # Record execution end time
+        end_time = time.time()
+        execution_time = (end_time - start_time) * 1000  # Convert to milliseconds
+        
+        # Store execution data with error
+        execution = Execution(
+            function_id=function_id,
+            start_time=start_time,
+            end_time=end_time,
+            execution_time=execution_time,
+            status="error",
+            error_message=str(e),
+            virtualization="docker"
+        )
+        db.add(execution)
+        db.commit()
+        
+        raise HTTPException(status_code=500, detail=f"Function execution failed: {str(e)}")

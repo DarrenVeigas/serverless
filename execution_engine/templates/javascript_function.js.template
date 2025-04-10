@@ -1,0 +1,33 @@
+// Function code
+{{FUNCTION_CODE}}
+
+/**
+ * Function handler that will be called by the execution engine
+ */
+function handler(event) {
+    return main(event);
+}
+
+// Read event data from stdin
+const readline = require('readline');
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: false
+});
+
+let eventData = '';
+rl.on('line', (line) => {
+    eventData += line;
+});
+
+rl.on('close', () => {
+    // Parse event data
+    const event = JSON.parse(eventData);
+    
+    // Call the handler and get the result
+    const result = handler(event);
+    
+    // Output the result as JSON
+    console.log(JSON.stringify(result));
+});

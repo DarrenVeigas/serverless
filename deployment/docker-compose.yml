@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # Backend API service
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: serverless-backend
+    volumes:
+      - ../backend:/app/backend
+      - ../execution_engine:/app/execution_engine
+      - /var/run/docker.sock:/var/run/docker.sock  # Give access to Docker socket
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - SQLALCHEMY_DATABASE_URL=sqlite:///./serverless.db
+      - MAX_WORKERS=4
+    restart: unless-stopped
+    networks:
+      - serverless-network
+    depends_on:
+      - db
+
+  # Frontend service
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: serverless-frontend
+    volumes:
+      - ../frontend:/app/frontend
+    ports:
+      - "8080:8080"
+    environment:
+      - API_URL=http://backend:8000
+    restart: unless-stopped
+    networks:
+      - serverless-network
+    depends_on:
+      - backend
+
+  # Database service (SQLite for simplicity, can be changed to PostgreSQL if needed)
+  db:
+    image: alpine:latest
+    container_name: serverless-db
+    volumes:
+      - ../backend/db:/data
+    command: /bin/sh -c "touch /data/serverless.db && tail -f /dev/null"
+    networks:
+      - serverless-network
+
+networks:
+  serverless-network:
+    driver: bridge
