@@ -240,23 +240,29 @@ sudo systemctl restart docker
   curl -X POST http://localhost:8000/functions/ \
     -H "Content-Type: application/json" \
     -d '{
-      "name": "warmup-test",
-      "route": "warmup",
+      "name": "hello_world",
+      "route": "test",
       "language": "python",
-      "code": "def main(event):\n    return {\"message\": \"Warm function response\"}\n",
+      "code": "def main(event):\n    name = event.get(\"name\", \"World\")\n    return {\"message\": f\"Hello, {name}!\", \"received_event\": event}",
       "timeout": 30
     }'
-  
-  # Get the function ID
-  WARMUP_FUNCTION_ID=$(curl -s http://localhost:8000/functions/ | grep -o '"id":"[^"]*".*warmup-test' | cut -d'"' -f4)
-  
-  # Execute once (cold start)
-  time curl -X POST http://localhost:8000/functions/$WARMUP_FUNCTION_ID/execute
-  
-  # Execute again (should be warm start)
-  time curl -X POST http://localhost:8000/functions/$WARMUP_FUNCTION_ID/execute
-  ```
-  ✓ Expected: Second execution should be faster
+
+    curl -X POST http://localhost:8000/functions/1/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Test User"
+  }'
+
+    # Execute multiple times to verify warm container reuse
+  for i in {1..5}; do
+    echo "Request $i:"
+    time curl -X POST http://localhost:8000/functions/1/execute \
+      -H "Content-Type: application/json" \
+      -d '{"name": "Test User", "iteration": '"$i"'}'
+    echo -e "\n"
+    sleep 1
+  done
+
 
 - **Container Pool Testing:**
   ```bash

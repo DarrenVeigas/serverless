@@ -42,6 +42,8 @@ def create_function(function: FunctionCreate, db: Session = Depends(get_db)):
         container_image = docker_engine.build_function_image(db_function)
         db_function.container_image = container_image
         db.commit()
+        if db_function.container_image:
+            docker_engine._warm_function_containers(db_function)
     except Exception as e:
         # If container build fails, we'll still save the function but mark it as inactive
         db_function.is_active = False
@@ -126,7 +128,7 @@ def execute_function(function_id: int, request_data: dict = None, db: Session = 
     """
     if request_data is None:
         request_data = {}
-    
+    print(request_data)
     db_function = db.query(Function).filter(Function.id == function_id).first()
     if db_function is None:
         raise HTTPException(status_code=404, detail="Function not found")
@@ -160,7 +162,7 @@ def execute_function(function_id: int, request_data: dict = None, db: Session = 
         )
         db.add(execution)
         db.commit()
-        
+        docker_engine._warm_function_containers(db_function)
         return result
     except Exception as e:
         # Record execution end time
