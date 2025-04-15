@@ -6,8 +6,8 @@ from pathlib import Path
 import os
 import json
 
-from docker_engine import DockerExecutionEngine
-from gvisor_engine import GVisorExecutionEngine
+from execution_engine.docker_engine import DockerExecutionEngine
+from execution_engine.gvisor_engine import GVisorExecutionEngine
 
 class PerformanceComparison:
     """

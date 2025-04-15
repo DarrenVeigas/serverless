@@ -10,6 +10,8 @@ from backend.models.schemas import FunctionCreate, Function as FunctionSchema, F
 
 # Import execution engine
 from execution_engine.docker_engine import DockerExecutionEngine
+from execution_engine.gvisor_engine import GVisorExecutionEngine
+from execution_engine.performance_comparison import PerformanceComparison
 
 router = APIRouter(
     prefix="/functions",
@@ -19,6 +21,8 @@ router = APIRouter(
 
 # Initialize execution engine
 docker_engine = DockerExecutionEngine()
+gvisor_engine = GVisorExecutionEngine()
+performance_comparison = PerformanceComparison()
 
 @router.post("/", response_model=FunctionSchema, status_code=status.HTTP_201_CREATED)
 def create_function(function: FunctionCreate, db: Session = Depends(get_db)):
@@ -30,7 +34,8 @@ def create_function(function: FunctionCreate, db: Session = Depends(get_db)):
         route=function.route,
         language=function.language,
         code=function.code,
-        timeout=function.timeout
+        timeout=function.timeout,
+        virtualization=function.virtualization
     )
     
     db.add(db_function)
@@ -39,11 +44,26 @@ def create_function(function: FunctionCreate, db: Session = Depends(get_db)):
     
     # Build container image for this function
     try:
+        # Always build the Docker container image as the base image
         container_image = docker_engine.build_function_image(db_function)
         db_function.container_image = container_image
         db.commit()
-        if db_function.container_image:
+        
+        # If virtualization preference is gVisor, also build the gVisor image
+        if db_function.virtualization == "gvisor":
+            try:
+                gvisor_image = gvisor_engine.build_function_image(db_function)
+                db_function.gvisor_image = gvisor_image
+                db.commit()
+                print(f"Built gVisor image for function {db_function.id}")
+            except Exception as e:
+                print(f"Error building gVisor image: {e}")
+                # Don't mark function as inactive if only gVisor build fails
+        
+        # Only warm Docker containers if Docker virtualization is preferred
+        if db_function.virtualization == "docker" and db_function.container_image:
             docker_engine._warm_function_containers(db_function)
+            
     except Exception as e:
         # If container build fails, we'll still save the function but mark it as inactive
         db_function.is_active = False
@@ -128,7 +148,6 @@ def execute_function(function_id: int, request_data: dict = None, db: Session = 
     """
     if request_data is None:
         request_data = {}
-    print(request_data)
     db_function = db.query(Function).filter(Function.id == function_id).first()
     if db_function is None:
         raise HTTPException(status_code=404, detail="Function not found")
@@ -138,15 +157,39 @@ def execute_function(function_id: int, request_data: dict = None, db: Session = 
     
     # Record execution start time
     start_time = time.time()
+    virtualization = db_function.virtualization if hasattr(db_function, 'virtualization') else "docker"
     
+    print(f"Using virtualization from database: {virtualization}")
     try:
+
+        if virtualization == "gvisor":
+            # If using gVisor but the function doesn't have a gVisor image yet, build one
+            if not db_function.gvisor_image:
+                gvisor_image = gvisor_engine.build_function_image(db_function)
+                db_function.gvisor_image = gvisor_image
+                db.commit()
+                
+            # Use the gVisor image
+            original_image = db_function.container_image
+            db_function.container_image = db_function.gvisor_image
+            
+            # Execute function using gVisor engine
+            result = gvisor_engine.execute_function(
+                db_function,
+                request_data,
+                timeout=db_function.timeout
+            )
+            
+            # Restore original image
+            db_function.container_image = original_image
+        else: 
         # Execute function using Docker engine
-        result = docker_engine.execute_function(
-            db_function,
-            request_data,
-            timeout=db_function.timeout
-        )
-        
+            result = docker_engine.execute_function(
+                db_function,
+                request_data,
+                timeout=db_function.timeout
+            )
+            docker_engine._warm_function_containers(db_function)
         # Record execution end time
         end_time = time.time()
         execution_time = (end_time - start_time) * 1000  # Convert to milliseconds
@@ -158,11 +201,10 @@ def execute_function(function_id: int, request_data: dict = None, db: Session = 
             end_time=end_time,
             execution_time=execution_time,
             status="success",
-            virtualization="docker"
+            virtualization=virtualization
         )
         db.add(execution)
         db.commit()
-        docker_engine._warm_function_containers(db_function)
         return result
     except Exception as e:
         # Record execution end time
@@ -177,9 +219,38 @@ def execute_function(function_id: int, request_data: dict = None, db: Session = 
             execution_time=execution_time,
             status="error",
             error_message=str(e),
-            virtualization="docker"
+            virtualization=virtualization
         )
         db.add(execution)
         db.commit()
         
         raise HTTPException(status_code=500, detail=f"Function execution failed: {str(e)}")
+
+
+@router.post("/{function_id}/benchmark", status_code=status.HTTP_200_OK)
+def benchmark_function(
+    function_id: int, 
+    request_data: dict = None, 
+    iterations: int = 5, 
+    db: Session = Depends(get_db)
+):
+    """
+    Benchmark a function using both Docker and gVisor
+    Returns performance comparison data
+    """
+    if request_data is None:
+        request_data = {}
+    
+    db_function = db.query(Function).filter(Function.id == function_id).first()
+    if db_function is None:
+        raise HTTPException(status_code=404, detail="Function not found")
+    
+    if not db_function.is_active:
+        raise HTTPException(status_code=400, detail="Function is not active")
+    
+    try:
+        # Run benchmark tests
+        results = performance_comparison.run_benchmark(db_function, request_data, iterations)
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Benchmark failed: {str(e)}")

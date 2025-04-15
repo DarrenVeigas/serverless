@@ -15,8 +15,9 @@ class Function(Base):
     code = Column(Text)  # The actual function code
     timeout = Column(Integer, default=30)  # Timeout in seconds
     container_image = Column(String, nullable=True)  # Docker image name
+    gvisor_image = Column(String, nullable=True)  # gVisor image name
     is_active = Column(Boolean, default=True)
-    
+    virtualization = Column(String, default="docker")  # Add this field with a default value
     # Relationship to executions
     executions = relationship("Execution", back_populates="function")
 

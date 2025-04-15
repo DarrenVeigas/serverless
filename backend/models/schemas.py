@@ -9,13 +9,15 @@ class FunctionBase(BaseModel):
     language: str
     code: str
     timeout: int = 30
-    
+    virtualization: str = "docker"
+
 class FunctionCreate(FunctionBase):
     pass
 
 class Function(FunctionBase):
     id: int
     container_image: Optional[str] = None
+    gvisor_image: Optional[str] = None  
     is_active: bool
     
     class Config:

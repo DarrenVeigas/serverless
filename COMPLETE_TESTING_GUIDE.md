@@ -305,12 +305,10 @@ sudo systemctl restart docker
     }'
   
   # Get the function ID
-  GVISOR_FUNCTION_ID=$(curl -s http://localhost:8000/functions/ | grep -o '"id":"[^"]*".*gvisor-test' | cut -d'"' -f4)
-  
-  # Execute the function
-  curl -X POST http://localhost:8000/functions/$GVISOR_FUNCTION_ID/execute \
+  curl -X POST http://localhost:8000/functions/1/execute \
     -H "Content-Type: application/json" \
     -d '{"test": "gVisor execution"}'
+
   ```
   ✓ Expected: `{"message": "Running in gVisor", "data": {"test": "gVisor execution"}}`
 
