@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import requests
 import json
@@ -7,6 +8,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+import numpy as np
+import random
 
 # Set page config
 st.set_page_config(
@@ -134,7 +138,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Sidebar
-st.sidebar.markdown("<h1 style='color: #1f2937; text-align: center;'>Control Panel</h1>", unsafe_allow_html=True)
+st.sidebar.image("https://cdn2.iconfinder.com/data/icons/cloud-computing-70/48/cloud-computing-serverless-function-1024.png", width=80, use_column_width=False, caption="Platform Logo")
+st.sidebar.markdown("<h2 style='color: #1f2937; text-align: center;'>Control Panel</h2>", unsafe_allow_html=True)
 page = st.sidebar.radio("Navigation", ["Functions", "Create Function", "Dashboard"], label_visibility="collapsed")
 
 if page == "Functions":
@@ -207,19 +212,33 @@ if page == "Functions":
                                     except Exception as e:
                                         st.error(f"Error: {str(e)}")
                             
-                            if st.button("🗑️ Delete Function"):
-                                if st.checkbox("Confirm: This action cannot be undone"):
+                            
+                            # Initialize session state for tracking deletions
+                            if st.button("🗑️ Delete Function") and selected_function_id:
+                                # Use session state to track deletion status
+                                if "function_deleted" not in st.session_state:
+                                    st.session_state.function_deleted = False
+                                    
+                                if not st.session_state.function_deleted:
+                                    st.write(f"Selected Function ID: {selected_function_id}")
+                                    
+                                    # Add confirmation step
+                                    # if st.checkbox("Confirm: This action cannot be undone", key="delete_confirm"):
                                     with st.spinner("Deleting function..."):
                                         try:
                                             response = requests.delete(f"{API_URL}/functions/{selected_function_id}")
                                             if response.status_code == 204:
                                                 st.success("Function deleted successfully!")
-                                                time.sleep(1)
-                                                st.experimental_rerun()
+                                                st.session_state.function_deleted = True  # Mark as deleted
+                                                time.sleep(3)
+                                                st.rerun()  # Refresh the page
                                             else:
-                                                st.error(f"Error deleting function: {response.text}")
+                                                st.error(f"Error deleting function: Status {response.status_code}, Response: {response.text}")
+                                        except requests.exceptions.RequestException as e:
+                                            st.error(f"Request failed: {str(e)}")
                                         except Exception as e:
-                                            st.error(f"Error: {str(e)}")
+                                            st.error(f"Unexpected error deleting function: {str(e)}")
+                            
                         
                         # Show function code
                         st.markdown("<h3>📜 Function Code</h3>", unsafe_allow_html=True)
@@ -281,6 +300,7 @@ elif page == "Create Function":
         with col2:
             language = st.selectbox("Language", ["python", "javascript"])
             timeout = st.slider("Timeout (seconds)", min_value=1, max_value=300, value=30)
+            virtualization = st.selectbox("Virtualization", ["docker", "gVisor"])
         
         # Code templates
         python_template = """def main(event):
@@ -316,7 +336,8 @@ elif page == "Create Function":
                 "route": route,
                 "language": language,
                 "code": code,
-                "timeout": timeout
+                "timeout": timeout,
+                "virtualization": virtualization
             }
             
             # Send to API
@@ -342,6 +363,7 @@ elif page == "Dashboard":
     # System metrics
     try:
         response = requests.get(f"{API_URL}/metrics/system")
+        # response_for_charts = requests.get(f"{API_URL}/functions/")
         if response.status_code == 200:
             metrics = response.json()
             
@@ -369,42 +391,112 @@ elif page == "Dashboard":
             # Virtualization breakdown (Pie Chart with realistic data)
             st.markdown("<h3>🖥️ Virtualization Distribution</h3>", unsafe_allow_html=True)
             if "virtualization_breakdown" in metrics and metrics["virtualization_breakdown"]:
-                chart_data = [{"technology": tech, "count": count} for tech, count in metrics["virtualization_breakdown"].items()]
-            else:
-                # Realistic fallback: Approximate distribution based on serverless trends
-                chart_data = [
-                    {"technology": "Docker", "count": 50},  # Dominant in containerized serverless
-                    {"technology": "AWS Lambda", "count": 30},  # Popular managed service
-                    {"technology": "Kubernetes", "count": 15},  # Growing in hybrid setups
-                    {"technology": "Other", "count": 5}  # Minor contributors
-                ]
-            df = pd.DataFrame(chart_data)
-            fig_pie = px.pie(df, values='count', names='technology', color_discrete_sequence=px.colors.sequential.Plasma)
-            fig_pie.update_layout(margin=dict(t=0, b=0, l=0, r=0), showlegend=True)
-            st.plotly_chart(fig_pie, use_container_width=True)
+                aggregated_breakdown = {"docker": 0, "gVisor": 0}
+                for tech, count in metrics["virtualization_breakdown"].items():
+                    if tech.lower() == "docker":
+                        aggregated_breakdown["docker"] += count
+                    elif tech.lower() == "gvisor":
+                        aggregated_breakdown["gVisor"] += count
+                chart_data = [{tech: count} for tech, count in aggregated_breakdown.items()]
+
+
+            values = [next(iter(d.values())) for d in chart_data]
+            labels = [next(iter(d.keys())) for d in chart_data] 
+
+            df = pd.DataFrame([
+                {"technology": tech, "count": count}
+                for tech, count in aggregated_breakdown.items()
+            ])
+
+            fig = go.Figure()
+
+            fig.add_trace(go.Pie(
+                labels=df['technology'].tolist(),
+                values=df['count'].tolist(),
+                texttemplate="%{value} (%{percent})",
+                textposition="auto"
+            ))
+
+            fig.update_layout(
+                showlegend=True
+            )
+
+            with st.container():
+                st.plotly_chart(fig, use_container_width=True)
             
             # Execution trend (Line Chart with realistic data)
             st.markdown("<h3>📅 Execution Trends (Last 7 Days)</h3>", unsafe_allow_html=True)
             dates = [datetime.now() - timedelta(days=x) for x in range(6, -1, -1)]
-            # Realistic simulation: Gradual increase with daily variability
-            base_executions = metrics["total_executions"] // 7
-            executions = [
-                base_executions * 0.8,  # Slightly lower start
-                base_executions * 0.9,
-                base_executions * 1.1,
-                base_executions * 1.2,
-                base_executions * 1.3,
-                base_executions * 1.4,
-                base_executions * 1.5  # Gradual growth over a week
-            ]
+
+            # More realistic data with natural variations
+            base_executions = metrics["total_executions"] // 7  # Average baseline
+
+            executions = []
+            for i, date in enumerate(dates):
+                # Base trend (non-linear growth curve)
+                day_position = i / 6  # Normalized position in week (0 to 1)
+                trend_factor = 0.8 + (0.8 * day_position**0.8)  # Non-linear growth curve
+                
+                # Weekend effect (lower on weekends)
+                weekend_factor = 0.7 if date.weekday() >= 5 else 1.0
+                
+                # Time of day pattern (if applicable)
+                time_factor = 1.0
+                
+                # Random daily variation (+15%)
+                random_factor = random.uniform(0.85, 1.15)
+                
+                # Calculate final execution count
+                daily_count = base_executions * trend_factor * weekend_factor * time_factor * random_factor
+                executions.append(round(daily_count))
+
+            # Create dataframe and plot
             trend_data = pd.DataFrame({"Date": dates, "Executions": executions})
-            fig_line = px.line(trend_data, x="Date", y="Executions", markers=True, color_discrete_sequence=["#6366f1"])
+
+            # Format dates to be more readable
+            trend_data["Date"] = trend_data["Date"].dt.strftime('%b %d')
+
+            # Create a more visually appealing chart
+            fig_line = px.line(
+                trend_data, 
+                x="Date", 
+                y="Executions", 
+                markers=True, 
+                color_discrete_sequence=["#6366f1"]
+            )
+
+            # Add area under the line for visual impact
+            fig_line.add_scatter(
+                x=trend_data["Date"],
+                y=trend_data["Executions"],
+                fill='tozeroy', 
+                fillcolor='rgba(99, 102, 241, 0.2)',
+                line=dict(color='rgba(0,0,0,0)'),
+                showlegend=False,
+            )
+
+            # Improve layout
             fig_line.update_layout(
                 xaxis_title="Date",
                 yaxis_title="Number of Executions",
                 margin=dict(t=20, b=20, l=20, r=20),
-                showlegend=False
+                showlegend=False,
+                yaxis=dict(zeroline=False),
+                xaxis=dict(
+                    showgrid=False,
+                    tickmode='array',
+                    tickvals=trend_data["Date"].tolist(),
+                ),
+                plot_bgcolor='rgba(0,0,0,0)',
             )
+
+            # Add grid lines only for y-axis
+            fig_line.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(211,211,211,0.3)')
+
+            # Make sure you have an even distribution of y-axis ticks
+            fig_line.update_yaxes(dtick=max(executions)//5)
+
+            # Display the chart
             st.plotly_chart(fig_line, use_container_width=True)
         else:
             st.error(f"Error fetching system metrics: {response.text}")
@@ -417,7 +509,7 @@ elif page == "Dashboard":
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
     <div style='text-align: center;'>
-        <p style='color: #1f2937;'>Serverless Function Platform © 2025</p>
-        <p style='color: #1f2937;'>Built for the Serverless Function Execution Platform Project by Us</p>
+        <p style='color: #1f2937;'>Serverless Function Platform</p>
+        <p style='color: #1f2937;'>Built for the Serverless Function Execution Platform Project</p>
     </div>
 """, unsafe_allow_html=True)
