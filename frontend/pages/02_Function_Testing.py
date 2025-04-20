@@ -4,6 +4,7 @@ import json
 import time
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 # Set page config
 st.set_page_config(
@@ -90,6 +91,35 @@ st.markdown("""
         .tooltip:hover .tooltiptext {
             visibility: visible;
             opacity: 1;
+        .avg-container {
+        display: flex;
+        justify-content: space-around;
+        margin-bottom: 20px;
+    }
+    .avg-box {
+        padding: 15px;
+        border-radius: 10px;
+        width: 45%;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .gvisor-box {
+        background-color: rgba(255, 0, 0, 0.1);
+        border: 1px solid red;
+    }
+    .docker-box {
+        background-color: rgba(0, 0, 255, 0.1);
+        border: 1px solid blue;
+    }
+    .avg-title {
+        font-weight: bold;
+        font-size: 18px;
+        margin-bottom: 8px;
+    }
+    .avg-value {
+        font-size: 22px;
+        font-weight: bold;
+    }
         }
     </style>
 """, unsafe_allow_html=True)
@@ -243,6 +273,13 @@ try:
                                         f"{API_URL}/functions/{selected_function_id}/execute",
                                         json=input_data
                                     )
+                                    response1=requests.get(
+                                        f"{API_URL}/functions/{selected_function_id}",
+                                        json=input_data
+                                    )
+                                    function=response.json()
+                                    function1=response1.json()
+                                    virtualization = function1.get("virtualization")
                                     end_time = time.time()
                                     execution_time = (end_time - start_time) * 1000  # ms
                                     
@@ -250,9 +287,10 @@ try:
                                     st.session_state.execution_history.append({
                                         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                                         "execution_time_ms": execution_time,
-                                        "status": "Success" if response.status_code == 200 else "Error"
+                                        "status": "Success" if response.status_code == 200 else "Error",
+                                        "virtualization": virtualization
                                     })
-                                    
+                                                                    
                                     # Display result
                                     st.markdown("<h3>📤 Result</h3>", unsafe_allow_html=True)
                                     
@@ -281,17 +319,56 @@ try:
                     if st.session_state.execution_history:
                         st.markdown("<h3>📊 Execution History</h3>", unsafe_allow_html=True)
                         history_df = pd.DataFrame(st.session_state.execution_history)
-                        fig = px.bar(
-                            history_df,
-                            x="time",
-                            y="execution_time_ms",
-                            color="status",
-                            title="Recent Execution Times",
-                            labels={"time": "Execution Time", "execution_time_ms": "Time (ms)", "status": "Status"},
-                            color_discrete_map={"Success": "#6366f1", "Error": "#ef4444"}
-                        )
+
+                        error_df = history_df[history_df["execution_time_ms"] < 0]
+                        gvisor_errors = error_df[error_df["virtualization"] == "gVisor"].shape[0]
+                        docker_errors = error_df[error_df["virtualization"] == "docker"].shape[0]
+
+                        
+                        history_df = history_df[history_df["execution_time_ms"] >=0]
+
+                        colors = ['red' if v == 'gVisor' else 'blue' for v in history_df["virtualization"]]
+
+                        fig=go.Figure()
+                        fig.add_trace(go.Bar(
+                            x=history_df["time"].tolist(),
+                            y=history_df["execution_time_ms"].tolist(),
+                            text=history_df["virtualization"].tolist(),
+                            marker_color=colors
+                        ))
                         fig.update_layout(margin=dict(t=50, b=50, l=50, r=50), showlegend=True)
-                        st.plotly_chart(fig, use_container_width=True)
+                        fig.add_trace(go.Bar(
+                            x=[None], y=[None], name="gvisor", marker_color="red", showlegend=True
+                        ))
+                        fig.add_trace(go.Bar(
+                            x=[None], y=[None], name="docker", marker_color="blue", showlegend=True
+                        ))
+
+                        gvisor_df = history_df[history_df["virtualization"] == "gVisor"]
+                        docker_df = history_df[history_df["virtualization"] == "docker"]
+                        
+                        avg_gvisor = gvisor_df["execution_time_ms"].mean() if not gvisor_df.empty else 0
+                        avg_docker = docker_df["execution_time_ms"].mean() if not docker_df.empty else 0
+
+                        avg_html = f"""
+                            <div style="display: flex; justify-content: space-around; margin-bottom: 20px; margin-top: 20px;">
+                            <div style="padding: 15px; border-radius: 10px; width: 45%; text-align: center; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); background-color: rgba(255, 0, 0, 0.1); border: 2px solid #ff5252;">
+                                <div style="font-weight: bold; font-size: 18px; margin-bottom: 8px; color: #d32f2f;">gVisor Stats</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #b71c1c;">{avg_gvisor:.2f} ms</div>
+                                <div style="font-size: 16px; color: #d32f2f; margin-top: 8px;">Errors: <span style="font-weight: bold;">{gvisor_errors}</span></div>
+                            </div>
+                            <div style="padding: 15px; border-radius: 10px; width: 45%; text-align: center; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); background-color: rgba(0, 0, 255, 0.1); border: 2px solid #2979ff;">
+                                <div style="font-weight: bold; font-size: 18px; margin-bottom: 8px; color: #1565c0;">Docker Stats</div>
+                                <div style="font-size: 24px; font-weight: bold; color: #0d47a1;">{avg_docker:.2f} ms</div>
+                                <div style="font-size: 16px; color: #1565c0; margin-top: 8px;">Errors: <span style="font-weight: bold;">{docker_errors}</span></div>
+                            </div>
+                        </div>
+                        """
+                        
+                        st.markdown(avg_html, unsafe_allow_html=True)
+
+                        with st.container():
+                            st.plotly_chart(fig, use_container_width=True)
     else:
         st.error(f"Error fetching functions: {response.text}")
 except Exception as e:
@@ -303,7 +380,7 @@ st.markdown("</div></div>", unsafe_allow_html=True)
 # Footer
 st.markdown("""
     <div style='text-align: center; margin-top: 20px;'>
-        <p style='color: #6b7280; font-size: 0.9rem;'>Serverless Function Platform © 2024</p>
-        <p style='color: #6b7280; font-size: 0.8rem;'>Built for the Serverless Function Execution Platform course</p>
+        <p style='color: #6b7280; font-size: 0.9rem;'>Serverless Function Platform</p>
+        <p style='color: #6b7280; font-size: 0.8rem;'>Built for the Serverless Function Execution Platform Project</p>
     </div>
 """, unsafe_allow_html=True)

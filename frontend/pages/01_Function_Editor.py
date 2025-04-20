@@ -166,6 +166,7 @@ try:
                                 "language": language,
                                 "code": code,
                                 "timeout": timeout
+                                
                             }
                             
                             # Send to API
@@ -194,7 +195,7 @@ st.markdown("</div></div>", unsafe_allow_html=True)
 # Footer
 st.markdown("""
     <div style='text-align: center; margin-top: 20px;'>
-        <p style='color: #6b7280; font-size: 0.9rem;'>Serverless Function Platform © 2024</p>
-        <p style='color: #6b7280; font-size: 0.8rem;'>Built for the Serverless Function Execution Platform course</p>
+        <p style='color: #6b7280; font-size: 0.9rem;'>Serverless Function Platform</p>
+        <p style='color: #6b7280; font-size: 0.8rem;'>Built for the Serverless Function Execution Platform Project</p>
     </div>
 """, unsafe_allow_html=True)
