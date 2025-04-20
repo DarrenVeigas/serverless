@@ -50,7 +50,7 @@ def create_function(function: FunctionCreate, db: Session = Depends(get_db)):
         db.commit()
         
         # If virtualization preference is gVisor, also build the gVisor image
-        if db_function.virtualization == "gvisor":
+        if db_function.virtualization == "gVisor":
             try:
                 gvisor_image = gvisor_engine.build_function_image(db_function)
                 db_function.gvisor_image = gvisor_image
@@ -162,7 +162,7 @@ def execute_function(function_id: int, request_data: dict = None, db: Session = 
     print(f"Using virtualization from database: {virtualization}")
     try:
 
-        if virtualization == "gvisor":
+        if virtualization == "gVisor":
             # If using gVisor but the function doesn't have a gVisor image yet, build one
             if not db_function.gvisor_image:
                 gvisor_image = gvisor_engine.build_function_image(db_function)
